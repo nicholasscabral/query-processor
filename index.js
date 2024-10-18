@@ -278,36 +278,105 @@ const databaseSchema = {
 
 
 const fs = require('fs'); // Importar módulo para escrita de arquivo
-const { createCanvas } = require('canvas'); // Importar módulo canvas para salvar a árvore como imagem
-const { Graph } = require('graphlib'); // Importar módulo para gerar grafos
-// const { graphviz } = require('graphviz-cli'); // Importar graphviz-cli para visualização de grafo
-
 // 2. Funcionalidades Principais (Etapa 2)
 
 // Parser - Analisando uma consulta SQL simples (Etapa 2a)
 function parseSQL(query) {
-  const selectRegex = /select (.+) from (.+) where (.+)/i;
-  const match = query.match(selectRegex);
-  if (!match) {
-    throw new Error('Consulta SQL inválida');
+  query = query.trim();
+
+  let selectClause = '';
+  let fromClause = '';
+  let whereClause = '';
+
+  // Extract SELECT clause
+  let selectMatch = query.match(/^select\s+(.*?)\s+from\s+/i);
+  if (selectMatch) {
+    selectClause = selectMatch[1].trim();
+    query = query.substring(selectMatch[0].length).trim(); // Remove 'SELECT ... FROM' from the query
+  } else {
+    throw new Error('Invalid SQL query: SELECT clause not found');
   }
 
-  const columns = match[1].split(',').map(col => col.trim());
-  const tables = match[2].split('join').map(tbl => tbl.trim());
-  const whereClause = match[3] ? match[3].trim() : null;
+  // Extract WHERE clause, if any
+  let whereIndex = query.toLowerCase().indexOf(' where ');
+  if (whereIndex !== -1) {
+    fromClause = query.substring(0, whereIndex).trim();
+    whereClause = query.substring(whereIndex + 7).trim(); // Skip ' where '
+  } else {
+    fromClause = query;
+  }
 
-  // Verificar se as tabelas existem no esquema do banco de dados
-  tables.forEach(table => {
-    const tableName = table.split(' ')[0].toLowerCase(); // Pega o nome da tabela e converte para minúsculo
-    const tableNameInSchema = Object.keys(databaseSchema.tables).find(t => t.toLowerCase() === tableName);
+  // Now, we can parse the FROM and JOIN clauses
+
+  // Extract tables and joins
+  let tables = [];
+  let joins = [];
+
+  // Start parsing fromClause
+  let tokens = fromClause.split(/\s+/);
+  let i = 0;
+
+  // First table after FROM
+  if (i >= tokens.length) {
+    throw new Error('Invalid SQL query: No table specified in FROM clause');
+  }
+
+  let currentTable = tokens[i++];
+  tables.push({ table: currentTable });
+
+  while (i < tokens.length) {
+    let token = tokens[i].toLowerCase();
+    if (token === 'join') {
+      i++;
+      if (i >= tokens.length) {
+        throw new Error('Invalid SQL query: Expected table after JOIN');
+      }
+      let joinTable = tokens[i++];
+      if (i >= tokens.length || tokens[i].toLowerCase() !== 'on') {
+        throw new Error('Invalid SQL query: Expected ON after JOIN table');
+      }
+      i++; // Skip 'on'
+      if (i >= tokens.length) {
+        throw new Error('Invalid SQL query: Expected condition after ON');
+      }
+      let joinConditionTokens = [];
+      while (i < tokens.length && tokens[i].toLowerCase() !== 'join' && tokens[i].toLowerCase() !== 'where') {
+        joinConditionTokens.push(tokens[i++]);
+      }
+      let joinCondition = joinConditionTokens.join(' ');
+      joins.push({
+        table: joinTable,
+        condition: joinCondition
+      });
+    } else {
+      i++;
+    }
+  }
+
+  // Extract columns from SELECT clause
+  const columns = selectClause.split(',').map(col => col.trim());
+
+  // Collect all tables
+  let allTables = tables.map(t => t.table);
+  joins.forEach(join => {
+    allTables.push(join.table);
+  });
+
+  // Verify that all tables exist in the schema
+  allTables.forEach(tableName => {
+    const tableNameLower = tableName.toLowerCase();
+    const tableNameInSchema = Object.keys(databaseSchema.tables).find(t => t.toLowerCase() === tableNameLower);
     if (!tableNameInSchema) {
       throw new Error(`Tabela '${tableName}' não encontrada no banco de dados`);
     }
   });
 
-  // Verificar se todas as colunas existem nas tabelas
+  // Verify that all columns exist in their respective tables
   columns.forEach(column => {
     const [tableName, columnName] = column.split('.');
+    if (!tableName || !columnName) {
+      throw new Error(`Invalid column format: '${column}'. Expected 'TableName.ColumnName'`);
+    }
     const tableNameLower = tableName.toLowerCase();
     const columnNameLower = columnName.toLowerCase();
     const tableNameInSchema = Object.keys(databaseSchema.tables).find(t => t.toLowerCase() === tableNameLower);
@@ -317,17 +386,21 @@ function parseSQL(query) {
     }
 
     const tableSchema = databaseSchema.tables[tableNameInSchema];
-    if (!tableSchema.columns || !Object.keys(tableSchema.columns).find(col => col.toLowerCase() === columnNameLower)) {
-      throw new Error(`Coluna '${column}' não encontrada na tabela '${tableName}'`);
+    const columnExists = Object.keys(tableSchema.columns).some(col => col.toLowerCase() === columnNameLower);
+
+    if (!columnExists) {
+      throw new Error(`Coluna '${columnName}' não encontrada na tabela '${tableName}'`);
     }
   });
 
   return {
     columns,
-    tables,
+    tables: tables.map(t => t.table),
+    joins,
     whereClause
   };
 }
+
 
 // Geração do Grafo de Operadores (Etapa 2b)
 function generateOperatorGraph(parsedQuery) {
@@ -355,7 +428,7 @@ function generateOperatorGraph(parsedQuery) {
 
 // Geração da Árvore de Consulta (Passo a Passo)
 function generateQueryTree(parsedQuery) {
-  // Passo 1: Aplicar heurística de junção
+  // Step 1: Apply join heuristics
   const rootNode = {
     name: 'PROJECTION',
     columns: parsedQuery.columns,
@@ -363,89 +436,95 @@ function generateQueryTree(parsedQuery) {
     executionOrder: 1
   };
 
-  let currentNode = rootNode;
   let orderCounter = 2;
 
-  // Passo 2: Redução de tuplas - Aplicar as seleções o mais cedo possível
-  if (parsedQuery.whereClause) {
-    const selectionNode1 = {
-      name: 'SELECTION',
-      condition: 'tb1.id > 300',
-      children: [],
+  // Step 2: Reduce tuples - Apply selections as early as possible
+  const tableNodes = {};
+
+  // Handle the main table
+  const mainTable = parsedQuery.tables[0];
+  let mainTableNode = {
+    name: `TABLE: ${mainTable}`,
+    table: mainTable,
+    executionOrder: orderCounter++
+  };
+
+  // If there is a WHERE clause that applies to this table, add a selection node
+  let selectionNodes = [];
+
+  if (parsedQuery.whereClause && parsedQuery.whereClause.includes(mainTable)) {
+    let selectionNode = {
+      name: `SELECTION: ${mainTable}`,
+      condition: parsedQuery.whereClause,
+      children: [mainTableNode],
       executionOrder: orderCounter++
     };
-    const selectionNode2 = {
-      name: 'SELECTION',
-      condition: 'tb3.sal <> 0',
-      children: [],
-      executionOrder: orderCounter++
-    };
-
-    const tb1Node = {
-      name: 'TABLE',
-      table: 'Tb1',
-      executionOrder: orderCounter++
-    };
-
-    selectionNode1.children.push(tb1Node);
-    currentNode.children.push(selectionNode1);
-    currentNode = rootNode;
-
-    const tb3Node = {
-      name: 'TABLE',
-      table: 'Tb3',
-      executionOrder: orderCounter++
-    };
-
-    selectionNode2.children.push(tb3Node);
-    currentNode.children.push(selectionNode2);
+    tableNodes[mainTable] = selectionNode;
+    selectionNodes.push(selectionNode);
+  } else {
+    tableNodes[mainTable] = mainTableNode;
+    selectionNodes.push(mainTableNode);
   }
 
-  // Adicionar os nós de junção para as tabelas
-  const joinNode1 = {
-    name: 'JOIN',
-    condition: 'Tb1.pk = Tb2.fk',
-    children: [],
-    executionOrder: orderCounter++
-  };
-  joinNode1.children.push(currentNode.children[0]);
-  joinNode1.children.push({
-    name: 'PROJECTION',
-    columns: ['Pk', 'fk'],
-    children: [
-      {
-        name: 'TABLE',
-        table: 'Tb2',
+  // Handle joins
+  parsedQuery.joins.forEach(join => {
+    let joinTable = join.table;
+    let joinCondition = join.condition;
+
+    let joinTableNode = {
+      name: `TABLE: ${joinTable}`,
+      table: joinTable,
+      executionOrder: orderCounter++
+    };
+
+    // If WHERE clause applies to this table, add selection node
+    let joinSelectionNode = null;
+    if (parsedQuery.whereClause && parsedQuery.whereClause.includes(joinTable)) {
+      joinSelectionNode = {
+        name: `SELECTION: ${joinTable}`,
+        condition: parsedQuery.whereClause,
+        children: [joinTableNode],
         executionOrder: orderCounter++
-      }
-    ],
-    executionOrder: orderCounter++
+      };
+    }
+
+    tableNodes[joinTable] = joinSelectionNode || joinTableNode;
+
+    // Now create join node between previous node and this node
+    let previousNode = selectionNodes.pop(); // Pop the last node
+    let newJoinNode = {
+      name: `JOIN (CONDITION: ${joinCondition})`,
+      condition: joinCondition,
+      children: [previousNode, joinSelectionNode || joinTableNode],
+      executionOrder: orderCounter++
+    };
+    selectionNodes.push(newJoinNode); // Push the join node back
   });
 
-  const joinNode2 = {
-    name: 'JOIN',
-    condition: 'Tb2.pk = Tb3.fk',
-    children: [],
-    executionOrder: orderCounter++
-  };
-  joinNode2.children.push(joinNode1);
-  joinNode2.children.push(currentNode.children[1]);
-
-  rootNode.children = [joinNode2];
+  rootNode.children = selectionNodes;
 
   return rootNode;
 }
 
-// Otimização da Árvore de Consulta (Passo 3 - Heurística da Redução de Campos)
+
+// Otimização da Árvore de Consulta
 function optimizeQueryTree(queryTree) {
   // Aplicar heurísticas para reduzir campos
-  queryTree.children.forEach(child => {
-    if (child.type === 'selection') {
-      child.columns = child.columns ? child.columns.filter(column => queryTree.columns.includes(column)) : child.columns;
+  function optimizeNode(node, parentColumns) {
+    if (node && node.name.startsWith('PROJECTION') && node.columns) {
+      node.name = `PROJECTION: ${node.columns.join(', ')}`;
+      node.columns = node.columns.filter(column => parentColumns.includes(column));
     }
-  });
+
+    if (node && node.children) {
+      node.children.forEach(child => optimizeNode(child, node.columns || parentColumns));
+    }
+  }
+
+  optimizeNode(queryTree, queryTree.columns || []);
   return queryTree;
 }
+
 
 // Processador de Consultas Simples (Etapa 3c)
 function processQuery(query) {
@@ -472,6 +551,7 @@ function processQuery(query) {
     console.error('Erro ao processar a consulta:', error);
   }
 }
+
 
 // Novos Testes com o esquema BD_Vendas
 console.log('--- Teste 1: Consultar Produtos e Categorias ---');

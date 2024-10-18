@@ -1,149 +1,150 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Optimized Query Tree</title>
     <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
     <style>
-        html, body {
-            width: 100%;
-            height: 100%;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background-color: #f5f5f5;
-        }
-        #cy {
-            width: 95%;
-            height: 95%;
-            border: 1px solid black;
-        }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        background-color: #f5f5f5;
+      }
+      #cy {
+        width: 95%;
+        height: 95%;
+        border: 1px solid black;
+      }
     </style>
-</head>
-<body>
+  </head>
+  <body>
     <div id="cy"></div>
     <script>
-        const queryTree = {
-  name: 'PROJECTION',
-  columns: [ 'Produto.Nome', 'Categoria.Descricao' ],
-  children: [
-    {
-      name: 'JOIN',
-      condition: 'Tb2.pk = Tb3.fk',
-      children: [
-        {
-          name: 'JOIN',
-          condition: 'Tb1.pk = Tb2.fk',
-          children: [
-            {
-              name: 'SELECTION',
-              condition: 'tb1.id > 300',
-              children: [ { name: 'TABLE', table: 'Tb1', executionOrder: 4 } ],
-              executionOrder: 2
-            },
-            {
-              name: 'PROJECTION',
-              columns: [ 'Pk', 'fk' ],
-              children: [ { name: 'TABLE', table: 'Tb2', executionOrder: 7 } ],
-              executionOrder: 8
-            }
-          ],
-          executionOrder: 6
-        },
-        {
-          name: 'SELECTION',
-          condition: 'tb3.sal <> 0',
-          children: [ { name: 'TABLE', table: 'Tb3', executionOrder: 5 } ],
-          executionOrder: 3
-        }
-      ],
-      executionOrder: 9
-    }
-  ],
-  executionOrder: 1
-}
-
-        // Function to convert JSON tree to Cytoscape elements
-        function convertToCytoscapeElements(node, parentId = null, idCounter = { count: 0 }) {
-            const nodeId = `node${idCounter.count++}`;
-            const label = `Execution Order: ${node.executionOrder || 'N/A'}\n${node.name}${node.condition ? ` (${node.condition})` : ''}`;
-            const elements = [{
-                data: {
-                    id: nodeId,
-                    label: label,
-                    executionOrder: node.executionOrder || ''
-                }
-            }];
-
-            if (parentId) {
-                elements.push({
-                    data: {
-                        id: `edge${idCounter.count++}`,
-                        source: parentId,
-                        target: nodeId
-                    }
-                });
-            }
-
-            if (node.children) {
-                node.children.forEach(child => {
-                    elements.push(...convertToCytoscapeElements(child, nodeId, idCounter));
-                });
-            }
-
-            return elements;
-        }
-
-        const elements = convertToCytoscapeElements(queryTree);
-
-        // Initialize Cytoscape
-        const cy = cytoscape({
-            container: document.getElementById('cy'),
-            elements: elements,
-            style: [
-                {
-                    selector: 'node',
-                    style: {
-                        'label': 'data(label)',
-                        'text-valign': 'center',
-                        'text-halign': 'center',
-                        'background-color': '#61bffc',
-                        'color': '#000',
-                        'font-size': '22px',
-                        'padding': '30px',
-                        'shape': 'roundrectangle',
-                        'border-width': 2,
-                        'border-color': '#000',
-                        'width': '300px',
-                        'height': 'auto',
-                        'text-wrap': 'wrap',
-                        'text-max-width': '280px'
-                    }
-                },
-                {
-                    selector: 'edge',
-                    style: {
-                        'width': 4,
-                        'line-color': '#666',
-                        'target-arrow-color': '#666',
-                        'target-arrow-shape': 'triangle',
-                        'curve-style': 'bezier'
-                    }
-                }
+      const queryTree = {
+        name: "PROJECTION (COLUMNS: Produto.Nome, Categoria.Descricao)",
+        columns: ["Produto.Nome", "Categoria.Descricao"],
+        children: [
+          {
+            name: "JOIN (CONDITION: Produto.Categoria_idCategoria = Categoria.idCategoria)",
+            condition: "Produto.Categoria_idCategoria = Categoria.idCategoria",
+            children: [
+              {
+                name: "SELECTION (TABLE: Produto)",
+                condition: "Produto.Preco > 100",
+                children: [
+                  {
+                    name: "TABLE (NAME: Produto)",
+                    table: "Produto",
+                    executionOrder: 2,
+                  },
+                ],
+                executionOrder: 3,
+              },
+              {
+                name: "TABLE (NAME: Categoria)",
+                table: "Categoria",
+                executionOrder: 4,
+              },
             ],
-            layout: {
-                name: 'breadthfirst',
-                directed: true,
-                padding: 50,
-                spacingFactor: 0.8 // Reduced to bring nodes closer
+            executionOrder: 5,
+          },
+        ],
+        executionOrder: 1,
+      };
+      function convertToCytoscapeElements(
+        node,
+        parentId = null,
+        idCounter = { count: 0 }
+      ) {
+        const nodeId = `node${idCounter.count++}`;
+        const label = `Execution Order: ${node.executionOrder || "N/A"}\n${
+          node.name
+        }${node.condition ? ` (${node.condition})` : ""}`;
+        const elements = [
+          {
+            data: {
+              id: nodeId,
+              label: label,
+              executionOrder: node.executionOrder || "",
             },
-            zoom: 0.75, // Initial zoom level
-            minZoom: 0.5, // Allow users to zoom out more if needed
-            maxZoom: 2
-        });
+          },
+        ];
+
+        if (parentId) {
+          elements.push({
+            data: {
+              id: `edge${idCounter.count++}`,
+              source: parentId,
+              target: nodeId,
+            },
+          });
+        }
+
+        if (node.children) {
+          node.children.forEach((child) => {
+            elements.push(
+              ...convertToCytoscapeElements(child, nodeId, idCounter)
+            );
+          });
+        }
+
+        return elements;
+      }
+
+      const elements = convertToCytoscapeElements(queryTree);
+
+      // Initialize Cytoscape
+      const cy = cytoscape({
+        container: document.getElementById("cy"),
+        elements: elements,
+        style: [
+          {
+            selector: "node",
+            style: {
+              label: "data(label)",
+              "text-valign": "center",
+              "text-halign": "center",
+              "background-color": "#61bffc",
+              color: "#000",
+              "font-size": "22px",
+              padding: "30px",
+              shape: "roundrectangle",
+              "border-width": 2,
+              "border-color": "#000",
+              width: "300px",
+              height: "auto",
+              "text-wrap": "wrap",
+              "text-max-width": "280px",
+            },
+          },
+          {
+            selector: "edge",
+            style: {
+              width: 4,
+              "line-color": "#666",
+              "target-arrow-color": "#666",
+              "target-arrow-shape": "triangle",
+              "curve-style": "bezier",
+            },
+          },
+        ],
+        layout: {
+          name: "breadthfirst",
+          directed: true,
+          padding: 50,
+          spacingFactor: 0.8,
+        },
+        zoom: 0.75,
+        minZoom: 0.5,
+        maxZoom: 2,
+      });
     </script>
-</body>
+  </body>
 </html>
