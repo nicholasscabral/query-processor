@@ -432,11 +432,11 @@ function generateQueryTree(parsedQuery) {
   const rootNode = {
     name: 'PROJECTION',
     columns: parsedQuery.columns,
-    children: [],
-    executionOrder: 1
+    children: []
+    // Removemos executionOrder aqui
   };
 
-  let orderCounter = 2;
+  // Não precisamos mais do orderCounter aqui
 
   // Step 2: Reduce tuples - Apply selections as early as possible
   const tableNodes = {};
@@ -445,8 +445,8 @@ function generateQueryTree(parsedQuery) {
   const mainTable = parsedQuery.tables[0];
   let mainTableNode = {
     name: `TABLE: ${mainTable}`,
-    table: mainTable,
-    executionOrder: orderCounter++
+    table: mainTable
+    // Removemos executionOrder aqui
   };
 
   // If there is a WHERE clause that applies to this table, add a selection node
@@ -456,8 +456,8 @@ function generateQueryTree(parsedQuery) {
     let selectionNode = {
       name: `SELECTION: ${mainTable}`,
       condition: parsedQuery.whereClause,
-      children: [mainTableNode],
-      executionOrder: orderCounter++
+      children: [mainTableNode]
+      // Removemos executionOrder aqui
     };
     tableNodes[mainTable] = selectionNode;
     selectionNodes.push(selectionNode);
@@ -473,8 +473,8 @@ function generateQueryTree(parsedQuery) {
 
     let joinTableNode = {
       name: `TABLE: ${joinTable}`,
-      table: joinTable,
-      executionOrder: orderCounter++
+      table: joinTable
+      // Removemos executionOrder aqui
     };
 
     // If WHERE clause applies to this table, add selection node
@@ -483,8 +483,8 @@ function generateQueryTree(parsedQuery) {
       joinSelectionNode = {
         name: `SELECTION: ${joinTable}`,
         condition: parsedQuery.whereClause,
-        children: [joinTableNode],
-        executionOrder: orderCounter++
+        children: [joinTableNode]
+        // Removemos executionOrder aqui
       };
     }
 
@@ -495,8 +495,8 @@ function generateQueryTree(parsedQuery) {
     let newJoinNode = {
       name: `JOIN (CONDITION: ${joinCondition})`,
       condition: joinCondition,
-      children: [previousNode, joinSelectionNode || joinTableNode],
-      executionOrder: orderCounter++
+      children: [previousNode, joinSelectionNode || joinTableNode]
+      // Removemos executionOrder aqui
     };
     selectionNodes.push(newJoinNode); // Push the join node back
   });
@@ -504,6 +504,25 @@ function generateQueryTree(parsedQuery) {
   rootNode.children = selectionNodes;
 
   return rootNode;
+}
+
+function assignExecutionOrder(node) {
+  let order = 0;
+
+  function traverse(node) {
+    if (!node) return;
+
+    if (node.children && node.children.length > 0) {
+      node.children.forEach(child => {
+        traverse(child);
+      });
+    }
+
+    // Assign executionOrder after children
+    node.executionOrder = ++order;
+  }
+
+  traverse(node);
 }
 
 
@@ -542,6 +561,10 @@ function processQuery(query) {
 
     // Otimizar Árvore de Consulta (Heurísticas)
     const optimizedTree = optimizeQueryTree(queryTree);
+
+    // Atribuir a ordem de execução correta
+    assignExecutionOrder(optimizedTree);
+
     console.log('Árvore de Consulta Otimizada:');
     console.dir(optimizedTree, { depth: null });
 

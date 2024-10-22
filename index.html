@@ -28,7 +28,7 @@
     <div id="cy"></div>
     <script>
       const queryTree = {
-        name: "PROJECTION (COLUMNS: Produto.Nome, Categoria.Descricao)",
+        name: "PROJECTION: Produto.Nome, Categoria.Descricao",
         columns: ["Produto.Nome", "Categoria.Descricao"],
         children: [
           {
@@ -36,27 +36,27 @@
             condition: "Produto.Categoria_idCategoria = Categoria.idCategoria",
             children: [
               {
-                name: "SELECTION (TABLE: Produto)",
+                name: "SELECTION: Produto",
                 condition: "Produto.Preco > 100",
                 children: [
                   {
-                    name: "TABLE (NAME: Produto)",
+                    name: "TABLE: Produto",
                     table: "Produto",
-                    executionOrder: 2,
+                    executionOrder: 1,
                   },
                 ],
-                executionOrder: 3,
+                executionOrder: 2,
               },
               {
-                name: "TABLE (NAME: Categoria)",
+                name: "TABLE: Categoria",
                 table: "Categoria",
-                executionOrder: 4,
+                executionOrder: 3,
               },
             ],
-            executionOrder: 5,
+            executionOrder: 4,
           },
         ],
-        executionOrder: 1,
+        executionOrder: 5,
       };
       function convertToCytoscapeElements(
         node,
@@ -119,7 +119,7 @@
               "border-width": 2,
               "border-color": "#000",
               width: "300px",
-              height: "auto",
+              height: "125px",
               "text-wrap": "wrap",
               "text-max-width": "280px",
             },
