@@ -276,10 +276,6 @@ const databaseSchema = {
   }
 }
 
-
-const fs = require('fs'); // Importar módulo para escrita de arquivo
-// 2. Funcionalidades Principais (Etapa 2)
-
 // Parser - Analisando uma consulta SQL simples (Etapa 2a)
 function parseSQL(query) {
   query = query.trim();
@@ -371,11 +367,25 @@ function parseSQL(query) {
     }
   });
 
+  // Extract columns from WHERE clause
+  let whereColumns = [];
+  if (whereClause) {
+    // Regular expression to match 'Table.Column'
+    const regex = /(\w+)\.(\w+)/g;
+    let match;
+    while ((match = regex.exec(whereClause)) !== null) {
+      whereColumns.push(`${match[1]}.${match[2]}`);
+    }
+  }
+
+  // Combine columns from SELECT and WHERE clauses
+  const allColumns = columns.concat(whereColumns);
+
   // Verify that all columns exist in their respective tables
-  columns.forEach(column => {
+  allColumns.forEach(column => {
     const [tableName, columnName] = column.split('.');
     if (!tableName || !columnName) {
-      throw new Error(`Invalid column format: '${column}'. Expected 'TableName.ColumnName'`);
+      throw new Error(`Formato de coluna inválido: '${column}'. Esperado 'TableName.ColumnName'`);
     }
     const tableNameLower = tableName.toLowerCase();
     const columnNameLower = columnName.toLowerCase();
@@ -400,6 +410,7 @@ function parseSQL(query) {
     whereClause
   };
 }
+
 
 
 // Geração do Grafo de Operadores (Etapa 2b)
@@ -565,20 +576,27 @@ function processQuery(query) {
     // Atribuir a ordem de execução correta
     assignExecutionOrder(optimizedTree);
 
-    console.log('Árvore de Consulta Otimizada:');
-    console.dir(optimizedTree, { depth: null });
+    // console.log('Árvore de Consulta Otimizada:');
+    // console.dir(optimizedTree, { depth: null });
 
     // Visualizar Árvore de Consulta com graphviz-cli
     // visualizeQueryTreeGraph(optimizedTree);
+
+    return optimizedTree
   } catch (error) {
     console.error('Erro ao processar a consulta:', error);
+    return { error: error.message }
   }
+}
+
+module.exports = {
+  processQuery
 }
 
 
 // Novos Testes com o esquema BD_Vendas
-console.log('--- Teste 1: Consultar Produtos e Categorias ---');
-processQuery('SELECT Produto.Nome, Categoria.Descricao FROM Produto JOIN Categoria ON Produto.Categoria_idCategoria = Categoria.idCategoria WHERE Produto.Preco > 100');
+// console.log('--- Teste 1: Consultar Produtos e Categorias ---');
+// processQuery('SELECT Produto.Nome, Categoria.Descricao FROM Produto JOIN Categoria ON Produto.Categoria_idCategoria = Categoria.idCategoria WHERE Produto.Preco > 100');
 
 // console.log('--- Teste 2: Consultar Pedidos de Clientes ---');
 // processQuery('SELECT Cliente.Nome, Pedido.ValorTotalPedido FROM Cliente JOIN Pedido ON Cliente.idCliente = Pedido.Cliente_idCliente WHERE Pedido.DataPedido >= "2023-01-01"');
