@@ -529,7 +529,6 @@ function assignExecutionOrder(node) {
       });
     }
 
-    // Assign executionOrder after children
     node.executionOrder = ++order;
   }
 
@@ -537,61 +536,90 @@ function assignExecutionOrder(node) {
 }
 
 
-// Otimização da Árvore de Consulta
+
+
+// Otimização da Árvore de Consulta - Ordem correta: TABLE -> SELECTION -> PROJECTION
 function optimizeQueryTree(queryTree) {
-  // Aplicar heurísticas para reduzir campos
-  function optimizeNode(node, parentColumns) {
-    if (node && node.name.startsWith('PROJECTION') && node.columns) {
-      node.name = `PROJECTION: ${node.columns.join(', ')}`;
-      node.columns = node.columns.filter(column => parentColumns.includes(column));
+  function optimizeNode(node, parentColumns = []) {
+    if (node.name.startsWith('JOIN')) {
+      const joinColumns = node.condition.match(/\w+\.\w+/g);
+      node.columns = joinColumns || [];
+
+      node.children = node.children.map(child => optimizeNode(child, node.columns.concat(parentColumns)));
+      return node;
     }
 
-    if (node && node.children) {
-      node.children.forEach(child => optimizeNode(child, node.columns || parentColumns));
+    if (node.name.startsWith('TABLE')) {
+      const tableColumns = parentColumns.filter(column => column.startsWith(`${node.table}.`));
+
+      let selectionNode = null;
+      if (node.selectionCondition) {
+        selectionNode = {
+          name: `SELECTION: ${node.table}`,
+          condition: node.selectionCondition,
+          children: [node],
+          executionOrder: null
+        };
+      }
+
+      const projectionNode = {
+        name: `PROJECTION: ${tableColumns.join(', ')}`,
+        columns: tableColumns,
+        children: [selectionNode || node],
+        executionOrder: null
+      };
+
+      return projectionNode;
     }
+
+    if (node.children) {
+      node.children = node.children.map(child => optimizeNode(child, parentColumns));
+    }
+
+    return node;
   }
 
-  optimizeNode(queryTree, queryTree.columns || []);
+  queryTree.children = queryTree.children.map(child => optimizeNode(child, queryTree.columns || []));
   return queryTree;
 }
 
 
-// Processador de Consultas Simples (Etapa 3c)
+
+// Função principal do processamento de consulta
 function processQuery(query) {
   try {
-    // Parser
+    // Parser da query SQL
     const parsedQuery = parseSQL(query);
 
     // Geração do Grafo de Operadores
     const operatorGraph = generateOperatorGraph(parsedQuery);
 
-    // Gerar Árvore de Consulta (Passo a Passo)
+    // Gerar a Árvore de Consulta inicial
     const queryTree = generateQueryTree(parsedQuery);
-    // console.log('Árvore de Consulta Inicial:');
-    // console.dir(queryTree, { depth: null });
+    assignExecutionOrder(queryTree);
+    console.log('Árvore de Consulta Inicial:');
+    console.dir(queryTree, { depth: null });
 
-    // Otimizar Árvore de Consulta (Heurísticas)
+    // Otimizar a Árvore de Consulta (aplicando a redução de colunas)
     const optimizedTree = optimizeQueryTree(queryTree);
 
-    // Atribuir a ordem de execução correta
+    // Atribuir a ordem de execução correta após a otimização
     assignExecutionOrder(optimizedTree);
 
-    // console.log('Árvore de Consulta Otimizada:');
-    // console.dir(optimizedTree, { depth: null });
+    console.log('Árvore de Consulta Otimizada:');
+    console.dir(optimizedTree, { depth: null });
 
-    // Visualizar Árvore de Consulta com graphviz-cli
-    // visualizeQueryTreeGraph(optimizedTree);
-
-    return optimizedTree
+    // Retornar a árvore de consulta otimizada
+    return optimizedTree;
   } catch (error) {
     console.error('Erro ao processar a consulta:', error);
-    return { error: error.message }
+    return { error: error.message };
   }
 }
 
 module.exports = {
   processQuery
-}
+};
 
 
 // Novos Testes com o esquema BD_Vendas
