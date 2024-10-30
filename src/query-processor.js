@@ -540,17 +540,49 @@ function assignExecutionOrder(node) {
 
 // Otimização da Árvore de Consulta - Ordem correta: TABLE -> SELECTION -> PROJECTION
 function optimizeQueryTree(queryTree) {
-  function optimizeNode(node, parentColumns = []) {
+  function findTableNode(node) {
+    if (node.name.startsWith('TABLE')) {
+      return node.table;
+    }
+    if (node.children) {
+      for (let child of node.children) {
+        const foundNode = findTableNode(child);
+        if (foundNode) {
+          return foundNode;
+        }
+      }
+    }
+    return null;
+  }
+  function optimizeNode(node, parentColumns = [], parentNode = null) {
     if (node.name.startsWith('JOIN')) {
       const joinColumns = node.condition.match(/\w+\.\w+/g);
       node.columns = joinColumns || [];
 
-      node.children = node.children.map(child => optimizeNode(child, node.columns.concat(parentColumns)));
+      node.children = node.children.map(child => optimizeNode(child, node.columns.concat(parentColumns), node));
       return node;
+    }
+
+    if (node.name.startsWith('SELECTION')) {
+      const tableNode = findTableNode(node);
+      const tableColumns = parentColumns.filter(column => column.startsWith(`${tableNode}.`));
+      
+      const projectionNode = {
+        name: `PROJECTION: ${tableColumns.join(', ')}`,
+        columns: tableColumns,
+        children: [node],
+        executionOrder: null
+      };
+
+      return projectionNode;
     }
 
     if (node.name.startsWith('TABLE')) {
       const tableColumns = parentColumns.filter(column => column.startsWith(`${node.table}.`));
+
+      if (parentNode && parentNode.name.startsWith('SELECTION')) {
+        return node;
+      }
 
       let selectionNode = null;
       if (node.selectionCondition) {
@@ -573,17 +605,15 @@ function optimizeQueryTree(queryTree) {
     }
 
     if (node.children) {
-      node.children = node.children.map(child => optimizeNode(child, parentColumns));
+      node.children = node.children.map(child => optimizeNode(child, parentColumns, node));
     }
 
     return node;
   }
 
-  queryTree.children = queryTree.children.map(child => optimizeNode(child, queryTree.columns || []));
+  queryTree.children = queryTree.children.map(child => optimizeNode(child, queryTree.columns || [], queryTree));
   return queryTree;
 }
-
-
 
 // Função principal do processamento de consulta
 function processQuery(query) {
